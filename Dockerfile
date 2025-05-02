@@ -1,4 +1,12 @@
-FROM node:20-slim
+FROM node:23-slim
+
+# Install curl and other dependencies needed by your bash script
+RUN apt-get update && apt-get install -y \
+    curl \
+    maven \
+    openjdk-17-jdk \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install pnpm
 RUN npm install -g pnpm
@@ -7,7 +15,7 @@ RUN npm install -g pnpm
 WORKDIR /app
 
 # Copy package files
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml* ./
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile

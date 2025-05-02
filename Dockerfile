@@ -2,10 +2,11 @@ FROM node:20-slim
 
 # Install required system dependencies with verification
 RUN apt-get update && \
-    apt-get install -y curl maven openjdk-17-jdk git && \
+    apt-get install -y curl maven openjdk-17-jdk git jq && \
     curl --version && \
     java -version && \
     mvn --version && \
+    jq --version && \
     rm -rf /var/lib/apt/lists/*
 
 # Fix potential Windows line endings
@@ -29,7 +30,7 @@ RUN chmod +x bash.sh && \
 RUN mkdir -p generated-plugins
 
 # Verify curl is available in the final image
-RUN curl --version
+RUN curl --version && jq --version
 
 # Expose port
 EXPOSE 3001

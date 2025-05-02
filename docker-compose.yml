@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  api-server:
+    build: .
+    container_name: minecraft-plugin-api
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - SCRIPT_PATH=/app/bash.sh
+    volumes:
+      - ./bash.sh:/app/bash.sh
+      - plugin-data:/app/generated-plugins
+    restart: unless-stopped
+
+volumes:
+  plugin-data:

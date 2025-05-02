@@ -1,6 +1,6 @@
-FROM node:23-slim
+FROM node:20-slim
 
-# Install curl and other dependencies needed by your bash script
+# Install required system dependencies for bash.sh script
 RUN apt-get update && apt-get install -y \
     curl \
     maven \
@@ -8,28 +8,23 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pnpm
-RUN npm install -g pnpm
-
 # Create app directory
 WORKDIR /app
 
-# Copy package files
-COPY package.json pnpm-lock.yaml* ./
-
-# Install dependencies
-RUN pnpm install --frozen-lockfile
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm install
 
 # Copy application files
 COPY . .
 
-# Create the generated-plugins directory
-RUN mkdir -p generated-plugins
-
-# Make the bash.sh script executable
+# Make sure the bash script is executable
 RUN chmod +x bash.sh
 
-# Expose the port the app runs on
+# Create the plugins directory
+RUN mkdir -p generated-plugins
+
+# Expose port
 EXPOSE 3001
 
 # Start the application

@@ -16,14 +16,23 @@ const execPromise = util.promisify(exec);
 // Configurable script path - use environment variable or default to a local path
 const scriptPath = process.env.SCRIPT_PATH || path.join(__dirname, 'bash.sh');
 
+// Near the top of your file, after const declarations
+const corsOrigins = process.env.CORS_ORIGINS ? 
+  process.env.CORS_ORIGINS.split(',') : 
+  ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
-  methods: ['GET', 'POST'],
-  credentials: true
+  origin: corsOrigins,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(bodyParser.json({ limit: '10mb' })); // Parse JSON request bodies with larger limit
 
+// Add this after your other middleware and before your endpoints
+app.options('*', cors()); // Enable pre-flight for all routes
+ 
 // Base directory for storing generated plugins
 const PLUGINS_BASE_DIR = path.join(__dirname, 'generated-plugins');
 if (!fs.existsSync(PLUGINS_BASE_DIR)) {

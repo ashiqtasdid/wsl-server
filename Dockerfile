@@ -3,14 +3,9 @@ FROM node:20-slim
 # Install required system dependencies with verification
 RUN apt-get update && \
     apt-get install -y curl maven openjdk-17-jdk git jq && \
-    curl --version && \
-    java -version && \
-    mvn --version && \
-    jq --version && \
+    echo "Curl location: $(which curl)" && \
+    echo "JQ location: $(which jq)" && \
     rm -rf /var/lib/apt/lists/*
-
-# Fix potential Windows line endings
-RUN apt-get update && apt-get install -y dos2unix && dos2unix *.sh || true
 
 # Create app directory
 WORKDIR /app
@@ -22,18 +17,30 @@ RUN npm install
 # Copy application files
 COPY . .
 
-# Make sure the bash script is executable and fix line endings
-RUN chmod +x bash.sh && \
-    (which dos2unix && dos2unix bash.sh || true)
+# Make bash script executable
+RUN chmod +x bash.sh 
+
+# Fix Windows line endings if present
+RUN apt-get update && apt-get install -y dos2unix && \
+    dos2unix bash.sh && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create the plugins directory
 RUN mkdir -p generated-plugins
 
-# Verify curl is available in the final image
-RUN curl --version && jq --version
+# Final verification of tools
+RUN /usr/bin/curl --version && /usr/bin/jq --version
 
 # Expose port
 EXPOSE 3001
 
-# Start the application
-CMD ["node", "wsl-api-server.js"]
+# Create a wrapper script to check environment before starting
+RUN echo '#!/bin/bash\n\
+echo "Verifying container environment:"\n\
+echo "JQ: $(which jq)"\n\   
+echo "Curl: $(which curl)"\n\
+node wsl-api-server.js\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Start the application with the wrapper
+CMD ["/app/start.sh"]

@@ -73,9 +73,11 @@ app.post('/api/generate-plugin', async (req, res) => {
     const escapedPrompt = prompt.replace(/"/g, '\\"');
 
     // Command to execute the bash script directly
-    const command = `bash "${scriptPath}" "${escapedPrompt}" "${token}" "${outputPath}"`;
+    const apiHost = process.env.API_HOST || "http://host.docker.internal:5000";
+    const command = `API_HOST="${apiHost}" bash "${scriptPath}" "${escapedPrompt}" "${token}" "${outputPath}"`;
 
     console.log(`Executing command with script: ${scriptPath}`);
+    console.log(`Using API host: ${apiHost}`);
 
     // Execute the command asynchronously
     const { stdout, stderr } = await execPromise(command);
@@ -91,13 +93,21 @@ app.post('/api/generate-plugin', async (req, res) => {
 
     console.log("Script stdout:", stdout);
 
-    // Extract JAR file path from stdout if available
-    const jarPathMatch = stdout.match(/Plugin JAR file created: (.*\.jar)/);
+    // Extract JAR file path from stdout using the standardized format
+    // First try the new PLUGIN_JAR_PATH format
     let jarPath = null;
-
-    if (jarPathMatch && jarPathMatch[1]) {
-      jarPath = jarPathMatch[1];
-      console.log("Found JAR path:", jarPath);
+    const newFormatMatch = stdout.match(/PLUGIN_JAR_PATH:(.*)/);
+    
+    if (newFormatMatch && newFormatMatch[1]) {
+      jarPath = newFormatMatch[1].trim();
+      console.log("Found JAR path (new format):", jarPath);
+    } else {
+      // Fall back to the old format if needed
+      const oldFormatMatch = stdout.match(/Plugin JAR file created:?\s*(.*\.jar)/);
+      if (oldFormatMatch && oldFormatMatch[1]) {
+        jarPath = oldFormatMatch[1].trim();
+        console.log("Found JAR path (old format):", jarPath);
+      }
     }
 
     return res.json({
@@ -128,6 +138,10 @@ app.get('/api/download', (req, res) => {
         message: "File path is required"
       });
     }
+
+    // Normalize path separators (replace Windows backslashes with forward slashes)
+    filePath = filePath.replace(/\\/g, '/');
+    console.log("Processing download request for:", filePath);
 
     // Handle relative paths - check if path is relative
     if (!path.isAbsolute(filePath)) {

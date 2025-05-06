@@ -13,12 +13,10 @@ services:
       - plugin-data:/usr/src/app/generated-plugins
     environment:
       - PORT=3001
-      # Point to the API service by container name
       - API_HOST=http://gemini-api:5000
-      - SCRIPT_PATH=/usr/src/app/bash.sh
+      - SCRIPT_PATH=/app/bash.sh  # Updated path to match Dockerfile WORKDIR
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     restart: unless-stopped
-    # Use external network to connect to existing container
     external_links:
       - gemni-api-gemini-api-1:gemini-api
 

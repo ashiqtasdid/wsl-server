@@ -13,21 +13,19 @@ services:
       - plugin-data:/usr/src/app/generated-plugins
     environment:
       - PORT=3001
-      - API_HOST=${API_HOST:-http://host.docker.internal:5000}
+      # Point to the API service by container name
+      - API_HOST=http://gemini-api:5000
       - SCRIPT_PATH=/usr/src/app/bash.sh
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-    extra_hosts:
-      # This allows containers to communicate with the host machine
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
-
-  api-service:
-    networks:
-      - app-network
+    # Use external network to connect to existing container
+    external_links:
+      - gemni-api-gemini-api-1:gemini-api
 
 volumes:
   plugin-data:
 
 networks:
   app-network:
-    driver: bridge
+    external: true
+    name: gemni-api_default  # Use the network your API container is on

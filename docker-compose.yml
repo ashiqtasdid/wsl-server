@@ -14,11 +14,11 @@ services:
     environment:
       - PORT=3001
       - API_HOST=http://gemini-api:5000
-      - SCRIPT_PATH=/app/bash.sh  # Updated path to match Dockerfile WORKDIR
+      - SCRIPT_PATH=/app/bash.sh
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     restart: unless-stopped
     external_links:
-      - gemni-api-gemini-api-1:gemini-api
+      - gemni-api_gemini-api_1:gemini-api  # Use underscore, not dash
 
 volumes:
   plugin-data:
@@ -26,4 +26,4 @@ volumes:
 networks:
   app-network:
     external: true
-    name: gemni-api_default  # Use the network your API container is on
+    name: gemni-api_default  # This actually matches your docker ps output

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   api-server:
     build:
@@ -7,21 +5,23 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
-    # Remove the networks section
-    network_mode: "container:gemni-api-gemini-api-1"
+    networks:
+      - api-network
     volumes:
       - plugin-data:/usr/src/app/generated-plugins
     environment:
       - PORT=3001
-      - API_HOST=http://localhost:5000  # Use localhost since sharing network namespace
+      - API_HOST=http://gemni-api-gemini-api-1:5000  # Use the exact container name
       - SCRIPT_PATH=/app/bash.sh
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - API_TOKEN=${API_TOKEN}
     restart: unless-stopped
-    # Remove external_links section
 
 volumes:
   plugin-data:
 
-# Remove the networks section completely
+networks:
+  api-network:
+    external: false  # Create the network as part of this compose
+    driver: bridge

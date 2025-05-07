@@ -40,7 +40,7 @@ fi
 
 # Define API endpoints - use configurable host
 # Default to Docker bridge network gateway for container-to-container communication
-API_HOST="${API_HOST:-http://gemini-api:5000}"
+API_HOST="${API_HOST:-http://gemni-api-gemini-api-1:5000}"
 API_URL="${API_HOST}/api/create"
 API_URL_FIX="${API_HOST}/api/fix"
 

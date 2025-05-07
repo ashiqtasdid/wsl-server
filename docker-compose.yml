@@ -7,11 +7,12 @@ services:
       - "3001:3001"
     networks:
       - api-network
+      - shared-network  # Add the shared network
     volumes:
       - plugin-data:/usr/src/app/generated-plugins
     environment:
       - PORT=3001
-      - API_HOST=http://172.19.0.2:5000  # Replace with Gemini API container's actual IP
+      - API_HOST=http://gemni-api-gemini-api-1:5000  # Use container name
       # - API_HOST=http://host.docker.internal:5000  # Or try this for Docker Desktop
       - SCRIPT_PATH=/app/bash.sh
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
@@ -24,5 +25,6 @@ volumes:
 
 networks:
   api-network:
-    external: false  # Create the network as part of this compose
     driver: bridge
+  shared-network:
+    external: true  # Reference the existing network

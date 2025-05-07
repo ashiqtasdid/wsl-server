@@ -88,6 +88,7 @@ const rateLimit = (windowMs = 60000, max = 10) => {
 // Apply rate limiting to certain endpoints
 app.use('/api/generate-plugin', rateLimit(60000, 5)); // 5 requests per minute
 
+
 // Base directory for storing generated plugins
 const PLUGINS_BASE_DIR = path.join(__dirname, 'generated-plugins');
 if (!fs.existsSync(PLUGINS_BASE_DIR)) {

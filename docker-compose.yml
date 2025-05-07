@@ -16,9 +16,12 @@ services:
       - API_HOST=http://gemini-api:5000
       - SCRIPT_PATH=/app/bash.sh
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Add these environment variables
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - API_TOKEN=${API_TOKEN}
     restart: unless-stopped
     external_links:
-      - gemni-api_gemini-api_1:gemini-api  # Use underscore, not dash
+      - gemni-api-gemini-api-1:gemini-api  # Using hyphens, not underscores
 
 volumes:
   plugin-data:
@@ -26,4 +29,4 @@ volumes:
 networks:
   app-network:
     external: true
-    name: gemni-api_default  # This actually matches your docker ps output
+    name: gemni-api-default  # Using hyphens, not underscores

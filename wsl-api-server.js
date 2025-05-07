@@ -103,6 +103,9 @@ const safeJoin = (base, ...paths) => {
   return resolved;
 };
 
+// In-memory storage for build logs
+const activeBuilds = new Map();
+
 // Endpoint to generate a plugin
 app.post('/api/generate-plugin', async (req, res) => {
   const startTime = Date.now();
@@ -142,6 +145,13 @@ app.post('/api/generate-plugin', async (req, res) => {
       fs.mkdirSync(outputPath, { recursive: true });
     }
 
+    // Initialize log storage for this build
+    activeBuilds.set(uniqueId, {
+      logs: [],
+      status: 'initializing',
+      startTime: Date.now()
+    });
+
     // Directly run the bash script
     const escapedPrompt = prompt.replace(/"/g, '\\"');
     
@@ -169,12 +179,26 @@ app.post('/api/generate-plugin', async (req, res) => {
         const output = data.toString();
         logger.info(`[SCRIPT] ${output.trim()}`);
         stdoutChunks.push(output);
+        
+        // Store logs for retrieval
+        if (activeBuilds.has(uniqueId)) {
+          const buildData = activeBuilds.get(uniqueId);
+          buildData.logs.push({ type: 'stdout', message: output.trim(), time: Date.now() });
+          activeBuilds.set(uniqueId, buildData);
+        }
       });
 
       bashProcess.stderr.on('data', (data) => {
         const output = data.toString();
         logger.warn(`[SCRIPT-ERR] ${output.trim()}`);
         stderrChunks.push(output);
+        
+        // Store logs for retrieval
+        if (activeBuilds.has(uniqueId)) {
+          const buildData = activeBuilds.get(uniqueId);
+          buildData.logs.push({ type: 'stderr', message: output.trim(), time: Date.now() });
+          activeBuilds.set(uniqueId, buildData);
+        }
       });
 
       // Wait for the process to complete
@@ -215,6 +239,22 @@ app.post('/api/generate-plugin', async (req, res) => {
       const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
       logger.info(`Plugin generated in ${processingTime} seconds`);
 
+      // At the end, update build status and clean up older builds
+      const build = activeBuilds.get(uniqueId);
+      if (build) {
+        build.status = 'completed';
+        build.jarPath = jarPath;
+        
+        // Clean up old builds (keep only last 10)
+        const builds = Array.from(activeBuilds.entries());
+        if (builds.length > 10) {
+          builds.sort((a, b) => b[1].startTime - a[1].startTime);
+          for (let i = 10; i < builds.length; i++) {
+            activeBuilds.delete(builds[i][0]);
+          }
+        }
+      }
+
       return res.json({
         success: true,
         message: "Plugin generated successfully!",
@@ -241,6 +281,13 @@ app.post('/api/generate-plugin', async (req, res) => {
       });
     }
     
+    // Update build status on error
+    if (activeBuilds.has(uniqueId)) {
+      const build = activeBuilds.get(uniqueId);
+      build.status = 'failed';
+      build.error = error.message;
+    }
+
     return res.status(500).json({
       success: false,
       message: error.message || "An unknown error occurred"
@@ -479,6 +526,77 @@ app.get('/api/plugins', (req, res) => {
 
   } catch (error) {
     logger.error("Error listing plugins:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "An unknown error occurred"
+    });
+  }
+});
+
+// Endpoint to fetch build logs
+app.get('/api/build-logs', (req, res) => {
+  try {
+    const { id } = req.query;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Build ID is required"
+      });
+    }
+    
+    // Get the build from active builds or try to find in file system
+    if (activeBuilds.has(id)) {
+      const build = activeBuilds.get(id);
+      return res.json({
+        success: true,
+        logs: build.logs,
+        status: build.status,
+        startTime: build.startTime,
+        elapsedTime: Date.now() - build.startTime
+      });
+    } 
+    
+    // If build not in memory, try to get from generated plugins
+    const pluginDir = safeJoin(PLUGINS_BASE_DIR, id);
+    if (fs.existsSync(pluginDir)) {
+      // Check if there's a logs.txt file
+      const logFile = safeJoin(pluginDir, 'logs.txt');
+      
+      if (fs.existsSync(logFile)) {
+        const logs = fs.readFileSync(logFile, 'utf8')
+          .split('\n')
+          .filter(line => line.trim())
+          .map(line => ({ 
+            type: line.includes('[ERROR]') ? 'stderr' : 'stdout', 
+            message: line, 
+            time: null 
+          }));
+          
+        return res.json({
+          success: true,
+          logs,
+          status: 'completed',
+          fromFile: true
+        });
+      }
+      
+      // If no log file, just return a simple completed status
+      return res.json({
+        success: true,
+        logs: [{ type: 'stdout', message: 'Build completed, no logs available', time: null }],
+        status: 'completed',
+        fromFile: true
+      });
+    }
+    
+    // If we can't find the build, return an error
+    return res.status(404).json({
+      success: false,
+      message: `Build ${id} not found`
+    });
+  } catch (error) {
+    logger.error("Error fetching build logs:", error);
     return res.status(500).json({
       success: false,
       message: error.message || "An unknown error occurred"

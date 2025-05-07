@@ -2,7 +2,7 @@
 require('dotenv').config();
 
 const express = require('express');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
@@ -151,53 +151,83 @@ app.post('/api/generate-plugin', async (req, res) => {
 
     logger.info(`Executing command with script: ${scriptPath}`);
     logger.info(`Using API host: ${apiHost}`);
-    logger.debug(`Full command (without token): ${command.replace(token, '[REDACTED]')}`);
 
-    // Execute the command with timeout
-    const { stdout, stderr } = await execPromise(command, { 
-      timeout: timeoutSeconds * 1000, 
-      maxBuffer: 10 * 1024 * 1024 // 10MB buffer
-    });
+    // Use spawn instead of exec for real-time output
+    let stdoutChunks = [];
+    let stderrChunks = [];
 
-    // Check if the process was successful
-    if (stderr && !stderr.includes("Downloading:") && !stderr.includes("progress:")) {
-      logger.warn("Script stderr:", stderr);
-      return res.status(500).json({
-        success: false,
-        message: stderr
+    try {
+      // Set up the process with proper environment
+      const env = { ...process.env, API_HOST: apiHost };
+      const bashProcess = spawn('bash', [scriptPath, escapedPrompt, token, outputPath], { 
+        env: env,
+        timeout: timeoutSeconds * 1000
       });
-    }
 
-    logger.debug("Script stdout:", stdout);
+      // Capture and log output in real-time
+      bashProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        logger.info(`[SCRIPT] ${output.trim()}`);
+        stdoutChunks.push(output);
+      });
 
-    // Extract JAR file path from stdout using the standardized format
-    // First try the new PLUGIN_JAR_PATH format
-    let jarPath = null;
-    const newFormatMatch = stdout.match(/PLUGIN_JAR_PATH:(.*)/);
-    
-    if (newFormatMatch && newFormatMatch[1]) {
-      jarPath = newFormatMatch[1].trim();
-      logger.info("Found JAR path (new format):", jarPath);
-    } else {
-      // Fall back to the old format if needed
-      const oldFormatMatch = stdout.match(/Plugin JAR file created:?\s*(.*\.jar)/);
-      if (oldFormatMatch && oldFormatMatch[1]) {
-        jarPath = oldFormatMatch[1].trim();
-        logger.info("Found JAR path (old format):", jarPath);
+      bashProcess.stderr.on('data', (data) => {
+        const output = data.toString();
+        logger.warn(`[SCRIPT-ERR] ${output.trim()}`);
+        stderrChunks.push(output);
+      });
+
+      // Wait for the process to complete
+      const exitCode = await new Promise((resolve, reject) => {
+        bashProcess.on('close', resolve);
+        bashProcess.on('error', reject);
+      });
+
+      // Combine all output
+      const stdout = stdoutChunks.join('');
+      const stderr = stderrChunks.join('');
+
+      // Check if the process was successful
+      if (exitCode !== 0) {
+        logger.error(`Script exited with code ${exitCode}`);
+        return res.status(500).json({
+          success: false,
+          message: stderr || `Script exited with code ${exitCode}`
+        });
       }
+
+      // Continue with your existing code - Extract JAR file path from stdout...
+      let jarPath = null;
+      const newFormatMatch = stdout.match(/PLUGIN_JAR_PATH:(.*)/);
+      
+      if (newFormatMatch && newFormatMatch[1]) {
+        jarPath = newFormatMatch[1].trim();
+        logger.info("Found JAR path (new format):", jarPath);
+      } else {
+        // Fall back to the old format if needed
+        const oldFormatMatch = stdout.match(/Plugin JAR file created:?\s*(.*\.jar)/);
+        if (oldFormatMatch && oldFormatMatch[1]) {
+          jarPath = oldFormatMatch[1].trim();
+          logger.info("Found JAR path (old format):", jarPath);
+        }
+      }
+
+      const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+      logger.info(`Plugin generated in ${processingTime} seconds`);
+
+      return res.json({
+        success: true,
+        message: "Plugin generated successfully!",
+        jarPath: jarPath,
+        outputDir: outputPath,
+        processingTime: `${processingTime}s`,
+        log: stdout
+      });
+
+    } catch (error) {
+      logger.error("Error spawning script process:", error);
+      throw error; // Let the outer catch block handle this
     }
-
-    const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
-    logger.info(`Plugin generated in ${processingTime} seconds`);
-
-    return res.json({
-      success: true,
-      message: "Plugin generated successfully!",
-      jarPath: jarPath,
-      outputDir: outputPath,
-      processingTime: `${processingTime}s`,
-      log: stdout
-    });
 
   } catch (error) {
     logger.error("Error generating plugin:", error);

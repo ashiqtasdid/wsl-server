@@ -103,14 +103,27 @@ const safeJoin = (base, ...paths) => {
   return resolved;
 };
 
+// Build stages for tracking progress
+const buildStages = {
+  UNDERSTANDING: "Understanding plugin requirements",
+  REFINING: "Refining implementation approach",
+  GENERATING: "Generating code files",
+  CREATING: "Creating project structure",
+  COMPILING: "Compiling Java code",
+  FIXING: "Fixing compilation errors",
+  SUCCESS: "Build completed successfully",
+  FAILED: "Build failed"
+};
+
 // In-memory storage for build logs
 const activeBuilds = new Map();
 
 // Endpoint to generate a plugin
 app.post('/api/generate-plugin', async (req, res) => {
   const startTime = Date.now();
+  let uniqueId;
   try {
-    const { prompt, token, outputDir = './plugins' } = req.body;
+    const { prompt, token, outputDir = './plugins', buildId } = req.body;
 
     if (!prompt || !token) {
       return res.status(400).json({
@@ -118,6 +131,9 @@ app.post('/api/generate-plugin', async (req, res) => {
         message: "Prompt and token are required"
       });
     }
+
+    // Use the provided buildId or generate a new one
+    uniqueId = buildId || `plugin-${Date.now()}`;
 
     // Validate prompt (optional: add more validation as needed)
     if (prompt.length > 1000) {
@@ -138,18 +154,20 @@ app.post('/api/generate-plugin', async (req, res) => {
 
     // Create a unique folder for this generation
     const timestamp = Date.now();
-    const uniqueId = `plugin-${timestamp}`;
+    uniqueId = `plugin-${timestamp}`;
     const outputPath = safeJoin(PLUGINS_BASE_DIR, uniqueId);
 
     if (!fs.existsSync(outputPath)) {
       fs.mkdirSync(outputPath, { recursive: true });
     }
 
-    // Initialize log storage for this build
+    // Initialize log storage for this build with stage tracking
     activeBuilds.set(uniqueId, {
       logs: [],
       status: 'initializing',
-      startTime: Date.now()
+      startTime: Date.now(),
+      stage: buildStages.UNDERSTANDING,
+      fixAttempts: 0
     });
 
     // Directly run the bash script
@@ -184,6 +202,26 @@ app.post('/api/generate-plugin', async (req, res) => {
         if (activeBuilds.has(uniqueId)) {
           const buildData = activeBuilds.get(uniqueId);
           buildData.logs.push({ type: 'stdout', message: output.trim(), time: Date.now() });
+          
+          // Update build stage based on output patterns
+          if (output.includes("Analyzing your request") || output.includes("Understanding requirements")) {
+            buildData.stage = buildStages.UNDERSTANDING;
+          } else if (output.includes("Designing plugin structure") || output.includes("Refining implementation")) {
+            buildData.stage = buildStages.REFINING;
+          } else if (output.includes("Generating code") || output.includes("Writing plugin code")) {
+            buildData.stage = buildStages.GENERATING;
+          } else if (output.includes("Creating project files") || output.includes("Setting up project")) {
+            buildData.stage = buildStages.CREATING;
+          } else if (output.includes("Compiling") || output.includes("Running Maven")) {
+            buildData.stage = buildStages.COMPILING;
+          } else if (output.includes("Attempting to fix error") || output.includes("Fixing compilation issues")) {
+            buildData.fixAttempts++;
+            buildData.stage = buildStages.FIXING;
+          } else if (output.includes("Build successful") || output.includes("Plugin generation complete")) {
+            buildData.stage = buildStages.SUCCESS;
+            buildData.status = 'completed';
+          }
+          
           activeBuilds.set(uniqueId, buildData);
         }
       });
@@ -197,6 +235,12 @@ app.post('/api/generate-plugin', async (req, res) => {
         if (activeBuilds.has(uniqueId)) {
           const buildData = activeBuilds.get(uniqueId);
           buildData.logs.push({ type: 'stderr', message: output.trim(), time: Date.now() });
+          
+          // Check for compilation errors
+          if (output.includes("error:") || output.includes("Exception")) {
+            buildData.stage = buildStages.FIXING;
+          }
+          
           activeBuilds.set(uniqueId, buildData);
         }
       });
@@ -214,6 +258,15 @@ app.post('/api/generate-plugin', async (req, res) => {
       // Check if the process was successful
       if (exitCode !== 0) {
         logger.error(`Script exited with code ${exitCode}`);
+        
+        // Update build status
+        if (activeBuilds.has(uniqueId)) {
+          const build = activeBuilds.get(uniqueId);
+          build.status = 'failed';
+          build.stage = buildStages.FAILED;
+          activeBuilds.set(uniqueId, build);
+        }
+        
         return res.status(500).json({
           success: false,
           message: stderr || `Script exited with code ${exitCode}`
@@ -244,6 +297,7 @@ app.post('/api/generate-plugin', async (req, res) => {
       if (build) {
         build.status = 'completed';
         build.jarPath = jarPath;
+        build.stage = buildStages.SUCCESS;
         
         // Clean up old builds (keep only last 10)
         const builds = Array.from(activeBuilds.entries());
@@ -261,11 +315,22 @@ app.post('/api/generate-plugin', async (req, res) => {
         jarPath: jarPath,
         outputDir: outputPath,
         processingTime: `${processingTime}s`,
-        log: stdout
+        log: stdout,
+        buildId: uniqueId
       });
 
     } catch (error) {
       logger.error("Error spawning script process:", error);
+      
+      // Update build status on error
+      if (activeBuilds.has(uniqueId)) {
+        const build = activeBuilds.get(uniqueId);
+        build.status = 'failed';
+        build.stage = buildStages.FAILED;
+        build.error = error.message;
+        activeBuilds.set(uniqueId, build);
+      }
+      
       throw error; // Let the outer catch block handle this
     }
 
@@ -277,17 +342,59 @@ app.post('/api/generate-plugin', async (req, res) => {
       return res.status(504).json({
         success: false,
         message: `Script execution timed out after ${timeoutSeconds} seconds`,
-        error: error.message
+        error: error.message,
+        buildId: uniqueId
       });
     }
     
     // Update build status on error
-    if (activeBuilds.has(uniqueId)) {
+    if (uniqueId && activeBuilds.has(uniqueId)) {
       const build = activeBuilds.get(uniqueId);
       build.status = 'failed';
+      build.stage = buildStages.FAILED;
       build.error = error.message;
+      activeBuilds.set(uniqueId, build);
     }
 
+    return res.status(500).json({
+      success: false,
+      message: error.message || "An unknown error occurred",
+      buildId: uniqueId
+    });
+  }
+});
+
+// Endpoint to get build status
+app.get('/api/build-status/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Build ID is required"
+      });
+    }
+    
+    // Get the build from active builds
+    if (activeBuilds.has(id)) {
+      const build = activeBuilds.get(id);
+      return res.json({
+        success: true,
+        status: build.status,
+        stage: build.stage,
+        fixAttempts: build.fixAttempts,
+        elapsedTime: Date.now() - build.startTime
+      });
+    }
+    
+    // If build not found
+    return res.status(404).json({
+      success: false,
+      message: `Build ${id} not found`
+    });
+  } catch (error) {
+    logger.error("Error fetching build status:", error);
     return res.status(500).json({
       success: false,
       message: error.message || "An unknown error occurred"
@@ -552,6 +659,8 @@ app.get('/api/build-logs', (req, res) => {
         success: true,
         logs: build.logs,
         status: build.status,
+        stage: build.stage,
+        fixAttempts: build.fixAttempts,
         startTime: build.startTime,
         elapsedTime: Date.now() - build.startTime
       });
@@ -577,6 +686,7 @@ app.get('/api/build-logs', (req, res) => {
           success: true,
           logs,
           status: 'completed',
+          stage: buildStages.SUCCESS,
           fromFile: true
         });
       }
@@ -586,6 +696,7 @@ app.get('/api/build-logs', (req, res) => {
         success: true,
         logs: [{ type: 'stdout', message: 'Build completed, no logs available', time: null }],
         status: 'completed',
+        stage: buildStages.SUCCESS,
         fromFile: true
       });
     }
